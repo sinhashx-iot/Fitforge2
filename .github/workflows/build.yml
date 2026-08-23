@@ -1,0 +1,471 @@
+name: Build FitForge APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Generate Source Code and Build APK
+        run: |
+          set -e
+
+          mkdir -p FitForge/app/src/main/java/com/fitforge/personal/data
+          mkdir -p FitForge/app/src/main/res/values
+          cd FitForge
+
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FitForge"
+          include(":app")
+          EOF
+
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+              id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+              id("com.google.devtools.ksp") version "2.0.21-1.0.28" apply false
+          }
+          EOF
+
+          cat << 'EOF' > app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+              id("org.jetbrains.kotlin.plugin.compose")
+              id("com.google.devtools.ksp")
+          }
+
+          android {
+              namespace = "com.fitforge.personal"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.fitforge.personal"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              buildFeatures { compose = true }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.15.0")
+              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+              implementation("androidx.activity:activity-compose:1.9.3")
+              implementation(platform("androidx.compose:compose-bom:2024.11.00"))
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.ui:ui-graphics")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.compose.material:material-icons-extended")
+              implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+
+              val room_version = "2.6.1"
+              implementation("androidx.room:room-runtime:$room_version")
+              implementation("androidx.room:room-ktx:$room_version")
+              ksp("androidx.room:room-compiler:$room_version")
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/ic_menu_myplaces"
+                  android:label="FitForge"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.NoTitleBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:theme="@android:style/Theme.NoTitleBar">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/fitforge/personal/data/AppDatabase.kt
+          package com.fitforge.personal.data
+
+          import android.content.Context
+          import androidx.room.*
+          import kotlinx.coroutines.flow.Flow
+
+          @Entity(tableName = "fitness_day")
+          data class FitnessDay(
+              @PrimaryKey val date: String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()),
+              val steps: Int = 0,
+              val workoutMinutes: Int = 0,
+              val waterMl: Int = 0
+          )
+
+          @Entity(tableName = "finance_entry")
+          data class FinanceEntry(
+              @PrimaryKey(autoGenerate = true) val id: Int = 0,
+              val date: String,
+              val title: String,
+              val amount: Double,
+              val type: String,
+              val category: String
+          )
+
+          @Dao
+          interface FitnessDao {
+              @Query("SELECT * FROM fitness_day WHERE date = :date LIMIT 1")
+              fun getTodayFitness(date: String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())): Flow<FitnessDay?>
+
+              @Insert(onConflict = OnConflictStrategy.REPLACE)
+              suspend fun insertOrUpdate(day: FitnessDay)
+          }
+
+          @Dao
+          interface FinanceDao {
+              @Query("SELECT * FROM finance_entry ORDER BY id DESC")
+              fun getAllEntries(): Flow<List<FinanceEntry>>
+
+              @Query("SELECT SUM(amount) FROM finance_entry WHERE type = 'income'")
+              fun getTotalIncome(): Flow<Double?>
+
+              @Query("SELECT SUM(amount) FROM finance_entry WHERE type = 'expense'")
+              fun getTotalExpense(): Flow<Double?>
+
+              @Insert
+              suspend fun insertEntry(entry: FinanceEntry)
+          }
+
+          @Database(entities = [FitnessDay::class, FinanceEntry::class], version = 1, exportSchema = false)
+          abstract class AppDatabase : RoomDatabase() {
+              abstract fun fitnessDao(): FitnessDao
+              abstract fun financeDao(): FinanceDao
+
+              companion object {
+                  @Volatile private var INSTANCE: AppDatabase? = null
+                  fun getDatabase(context: Context): AppDatabase {
+                      return INSTANCE ?: synchronized(this) {
+                          val instance = Room.databaseBuilder(
+                              context.applicationContext,
+                              AppDatabase::class.java,
+                              "fitforge.db"
+                          ).build()
+                          INSTANCE = instance
+                          instance
+                      }
+                  }
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/java/com/fitforge/personal/MainActivity.kt
+          package com.fitforge.personal
+
+          import android.content.Context
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.animation.*
+          import androidx.compose.animation.core.*
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.draw.scale
+          import androidx.compose.ui.graphics.Brush
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.input.KeyboardType
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.ViewModel
+          import androidx.lifecycle.ViewModelProvider
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import androidx.lifecycle.viewModelScope
+          import com.fitforge.personal.data.AppDatabase
+          import com.fitforge.personal.data.FinanceEntry
+          import com.fitforge.personal.data.FitnessDay
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.flow.SharingStarted
+          import kotlinx.coroutines.flow.stateIn
+          import kotlinx.coroutines.launch
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          class MainViewModel(private val context: Context) : ViewModel() {
+              private val db = AppDatabase.getDatabase(context)
+              val todayFitness = db.fitnessDao().getTodayFitness().stateIn(viewModelScope, SharingStarted.Lazily, null)
+              val allFinance = db.financeDao().getAllEntries().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+              val totalIncome = db.financeDao().getTotalIncome().stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+              val totalExpense = db.financeDao().getTotalExpense().stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+
+              fun addSteps(amount: Int) = viewModelScope.launch {
+                  val current = todayFitness.value ?: FitnessDay()
+                  db.fitnessDao().insertOrUpdate(current.copy(steps = current.steps + amount))
+              }
+
+              fun addWorkout(minutes: Int) = viewModelScope.launch {
+                  val current = todayFitness.value ?: FitnessDay()
+                  db.fitnessDao().insertOrUpdate(current.copy(workoutMinutes = current.workoutMinutes + minutes))
+              }
+
+              fun addWater(ml: Int) = viewModelScope.launch {
+                  val current = todayFitness.value ?: FitnessDay()
+                  db.fitnessDao().insertOrUpdate(current.copy(waterMl = current.waterMl + ml))
+              }
+
+              fun addFinanceEntry(title: String, amount: Double, type: String, category: String) = viewModelScope.launch {
+                  db.financeDao().insertEntry(
+                      FinanceEntry(
+                          title = title,
+                          amount = amount,
+                          type = type,
+                          category = category,
+                          date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
+                      )
+                  )
+              }
+          }
+
+          class MainViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
+              override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                  @Suppress("UNCHECKED_CAST")
+                  return MainViewModel(context.applicationContext) as T
+              }
+          }
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent {
+                      FitForgeApp()
+                  }
+              }
+          }
+
+          @Composable
+          fun FitForgeApp() {
+              val context = LocalContext.current
+              val vm: MainViewModel = viewModel(factory = MainViewModelFactory(context))
+              var showIntro by remember { mutableStateOf(true) }
+
+              if (showIntro) {
+                  IntroScreen { showIntro = false }
+              } else {
+                  MainScreen(vm)
+              }
+          }
+
+          @Composable
+          fun IntroScreen(onComplete: () -> Unit) {
+              val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+              val scale by infiniteTransition.animateFloat(
+                  initialValue = 0.95f,
+                  targetValue = 1.05f,
+                  animationSpec = infiniteRepeatable(
+                      animation = tween(1200, easing = FastOutSlowInEasing),
+                      repeatMode = RepeatMode.Reverse
+                  ),
+                  label = "scale"
+              )
+
+              LaunchedEffect(Unit) {
+                  delay(2600)
+                  onComplete()
+              }
+
+              Box(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .background(
+                          Brush.radialGradient(
+                              colors = listOf(Color(0xFF2A164D), Color(0xFF0D0B14)),
+                              radius = 1200f
+                          )
+                      ),
+                  contentAlignment = Alignment.Center
+              ) {
+                  Column(
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      verticalArrangement = Arrangement.Center
+                  ) {
+                      Box(
+                          modifier = Modifier
+                              .size(130.dp)
+                              .scale(scale)
+                              .clip(CircleShape)
+                              .background(
+                                  Brush.linearGradient(
+                                      listOf(Color(0xFFFF3366), Color(0xFFFF9933))
+                                  )
+                              ),
+                          contentAlignment = Alignment.Center
+                      ) {
+                          Text(
+                              text = "F",
+                              color = Color.White,
+                              fontSize = 64.sp,
+                              fontWeight = FontWeight.Black
+                          )
+                      }
+
+                      Spacer(modifier = Modifier.height(28.dp))
+
+                      Text(
+                          text = "FITFORGE",
+                          color = Color.White,
+                          fontSize = 32.sp,
+                          fontWeight = FontWeight.ExtraBold,
+                          letterSpacing = 6.sp
+                      )
+
+                      Text(
+                          text = "TRAIN • TRACK • CONQUER",
+                          color = Color(0xFFFFAA44),
+                          fontSize = 12.sp,
+                          fontWeight = FontWeight.Bold,
+                          letterSpacing = 3.sp,
+                          modifier = Modifier.padding(top = 8.dp)
+                      )
+                  }
+              }
+          }
+
+          @OptIn(ExperimentalMaterial3Api::class)
+          @Composable
+          fun MainScreen(vm: MainViewModel) {
+              var selectedTab by remember { mutableIntStateOf(0) }
+              val todayFitness by vm.todayFitness.collectAsState()
+              val allFinance by vm.allFinance.collectAsState()
+              val income by vm.totalIncome.collectAsState()
+              val expense by vm.totalExpense.collectAsState()
+              var showAddExpenseDialog by remember { mutableStateOf(false) }
+
+              Scaffold(
+                  containerColor = Color(0xFF10121A),
+                  topBar = {
+                      TopAppBar(
+                          title = {
+                              Text(
+                                  text = if (selectedTab == 0) "FITFORGE" else "FINANCES",
+                                  fontWeight = FontWeight.Black,
+                                  letterSpacing = 2.sp,
+                                  color = Color.White
+                              )
+                          },
+                          colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF161822))
+                      )
+                  },
+                  bottomBar = {
+                      NavigationBar(containerColor = Color(0xFF161822)) {
+                          NavigationBarItem(
+                              selected = selectedTab == 0,
+                              onClick = { selectedTab = 0 },
+                              icon = { Icon(Icons.Default.FitnessCenter, contentDescription = null) },
+                              label = { Text("Fitness") }
+                          )
+                          NavigationBarItem(
+                              selected = selectedTab == 1,
+                              onClick = { selectedTab = 1 },
+                              icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null) },
+                              label = { Text("Finance") }
+                          )
+                      }
+                  },
+                  floatingActionButton = {
+                      if (selectedTab == 1) {
+                          FloatingActionButton(
+                              onClick = { showAddExpenseDialog = true },
+                              containerColor = Color(0xFFFF3366),
+                              contentColor = Color.White
+                          ) {
+                              Icon(Icons.Default.Add, contentDescription = "Add Transaction")
+                          }
+                      }
+                  }
+              ) { padding ->
+                  Box(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
+                      if (selectedTab == 0) {
+                          FitnessTab(todayFitness, vm)
+                      } else {
+                          FinanceTab(income ?: 0.0, expense ?: 0.0, allFinance)
+                      }
+                  }
+
+                  if (showAddExpenseDialog) {
+                      AddTransactionDialog(
+                          onDismiss = { showAddExpenseDialog = false },
+                          onAdd = { title, amt, type, cat ->
+                              vm.addFinanceEntry(title, amt, type, cat)
+                              showAddExpenseDialog = false
+                          }
+                      )
+                  }
+              }
+          }
+
+          @Composable
+          fun FitnessTab(today: FitnessDay?, vm: MainViewModel) {
+              val current = today ?: FitnessDay()
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                  item {
+                      MetricCard("Steps Taken", "${current.steps} / 10,000", (current.steps / 10000f).coerceIn(0f, 1f), Color(0xFFFF9933))
+                  }
+                  item {
+                      MetricCard("Workout Time", "${current.workoutMinutes} min / 60 min", (current.workoutMinutes / 60f).coerceIn(0f, 1f), Color(0xFFFF3366))
+                  }
+                  item {
+                      MetricCard("Water Intake", "${current.waterMl} min / 3,000 ml", (current.waterMl / 3000f).coerceIn(0f, 1f), Color(0xFF33CCFF))
+                  }
+                  item {
+                      Text("Quick Log", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
+                  }
+                  item {
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                          Button(onClick = { vm.addSteps(500) }, modifier = Modifier.weight(1f)) { Text("+500 Steps") }
+         
