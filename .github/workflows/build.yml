@@ -16,44 +16,476 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Fetch and Build Android APK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Assemble FitForge Application
         run: |
           set -e
-          
-          # 1. Download official template structure
-          git clone --depth 1 https://github.com/android/compose-samples.git temp_repo || true
-          
-          # 2. Setup standard Android Compose project workspace
           mkdir -p FitForge/app/src/main/java/com/fitforge/personal/data
           mkdir -p FitForge/app/src/main/res/values
 
-          # 3. Create settings file
-          printf "pluginManagement {\n  repositories {\n    google()\n    mavenCentral()\n    gradlePluginPortal()\n  }\n}\ndependencyResolutionManagement {\n  repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)\n  repositories {\n    google()\n    mavenCentral()\n  }\n}\nrootProject.name = \"FitForge\"\ninclude(\":app\")\n" > FitForge/settings.gradle.kts
+          # settings.gradle
+          cat > FitForge/settings.gradle << 'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FitForge"
+          include ':app'
+          EOF
 
-          # 4. Create root build file
-          printf "plugins {\n  id(\"com.android.application\") version \"8.7.3\" apply false\n  id(\"org.jetbrains.kotlin.android\") version \"2.0.21\" apply false\n  id(\"org.jetbrains.kotlin.plugin.compose\") version \"2.0.21\" apply false\n  id(\"com.google.devtools.ksp\") version \"2.0.21-1.0.28\" apply false\n}\n" > FitForge/build.gradle.kts
+          # root build.gradle
+          cat > FitForge/build.gradle << 'EOF'
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.5.2'
+                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
 
-          # 5. Create app build file
-          printf "plugins {\n  id(\"com.android.application\")\n  id(\"org.jetbrains.kotlin.android\")\n  id(\"org.jetbrains.kotlin.plugin.compose\")\n  id(\"com.google.devtools.ksp\")\n}\nandroid {\n  namespace = \"com.fitforge.personal\"\n  compileSdk = 35\n  defaultConfig {\n    applicationId = \"com.fitforge.personal\"\n    minSdk = 26\n    targetSdk = 35\n    versionCode = 1\n    versionName = \"1.0\"\n  }\n  buildFeatures { compose = true }\n  compileOptions {\n    sourceCompatibility = JavaVersion.VERSION_17\n    targetCompatibility = JavaVersion.VERSION_17\n  }\n  kotlinOptions { jvmTarget = \"17\" }\n}\ndependencies {\n  implementation(\"androidx.core:core-ktx:1.15.0\")\n  implementation(\"androidx.lifecycle:lifecycle-runtime-ktx:2.8.7\")\n  implementation(\"androidx.activity:activity-compose:1.9.3\")\n  implementation(platform(\"androidx.compose:compose-bom:2024.11.00\"))\n  implementation(\"androidx.compose.ui:ui\")\n  implementation(\"androidx.compose.ui:ui-graphics\")\n  implementation(\"androidx.compose.material3:material3\")\n  implementation(\"androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7\")\n  val room_version = \"2.6.1\"\n  implementation(\"androidx.room:room-runtime:\$room_version\")\n  implementation(\"androidx.room:room-ktx:\$room_version\")\n  ksp(\"androidx.room:room-compiler:\$room_version\")\n}\n" > FitForge/app/build.gradle.kts
+          # app/build.gradle
+          cat > FitForge/app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+              id 'kotlin-kapt'
+          }
 
-          # 6. Create manifest
-          printf "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n  <application android:allowBackup=\"true\" android:label=\"FitForge\" android:theme=\"@android:style/Theme.NoTitleBar\">\n    <activity android:name=\".MainActivity\" android:exported=\"true\">\n      <intent-filter>\n        <action android:name=\"android.intent.action.MAIN\" />\n        <category android:name=\"android.intent.category.LAUNCHER\" />\n      </intent-filter>\n    </activity>\n  </application>\n</manifest>\n" > FitForge/app/src/main/AndroidManifest.xml
+          android {
+              namespace 'com.fitforge.personal'
+              compileSdk 34
 
-          # 7. Create Room Database
-          printf "package com.fitforge.personal.data\n\nimport android.content.Context\nimport androidx.room.*\nimport kotlinx.coroutines.flow.Flow\n\n@Entity(tableName = \"fitness_day\")\ndata class FitnessDay(\n  @PrimaryKey val date: String = java.text.SimpleDateFormat(\"yyyy-MM-dd\", java.util.Locale.getDefault()).format(java.util.Date()),\n  val steps: Int = 0,\n  val workoutMinutes: Int = 0,\n  val waterMl: Int = 0\n)\n\n@Entity(tableName = \"finance_entry\")\ndata class FinanceEntry(\n  @PrimaryKey(autoGenerate = true) val id: Int = 0,\n  val date: String,\n  val title: String,\n  val amount: Double,\n  val type: String,\n  val category: String\n)\n\n@Dao\ninterface FitnessDao {\n  @Query(\"SELECT * FROM fitness_day WHERE date = :date LIMIT 1\")\n  fun getTodayFitness(date: String = java.text.SimpleDateFormat(\"yyyy-MM-dd\", java.util.Locale.getDefault()).format(java.util.Date())): Flow<FitnessDay?>\n  @Insert(onConflict = OnConflictStrategy.REPLACE)\n  suspend fun insertOrUpdate(day: FitnessDay)\n}\n\n@Dao\ninterface FinanceDao {\n  @Query(\"SELECT * FROM finance_entry ORDER BY id DESC\")\n  fun getAllEntries(): Flow<List<FinanceEntry>>\n  @Query(\"SELECT SUM(amount) FROM finance_entry WHERE type = 'income'\")\n  fun getTotalIncome(): Flow<Double?>\n  @Query(\"SELECT SUM(amount) FROM finance_entry WHERE type = 'expense'\")\n  fun getTotalExpense(): Flow<Double?>\n  @Insert\n  suspend fun insertEntry(entry: FinanceEntry)\n}\n\n@Database(entities = [FitnessDay::class, FinanceEntry::class], version = 1, exportSchema = false)\nabstract class AppDatabase : RoomDatabase() {\n  abstract fun fitnessDao(): FitnessDao\n  abstract fun financeDao(): FinanceDao\n  companion object {\n    @Volatile private var INSTANCE: AppDatabase? = null\n    fun getDatabase(context: Context): AppDatabase {\n      return INSTANCE ?: synchronized(this) {\n        val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, \"fitforge.db\").build()\n        INSTANCE = instance\n        instance\n      }\n    }\n  }\n}\n" > FitForge/app/src/main/java/com/fitforge/personal/data/AppDatabase.kt
+              defaultConfig {
+                  applicationId "com.fitforge.personal"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
 
-          # 8. Create MainActivity
-          printf "package com.fitforge.personal\n\nimport android.content.Context\nimport android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.compose.animation.core.*\nimport androidx.compose.foundation.background\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.foundation.lazy.items\nimport androidx.compose.foundation.shape.CircleShape\nimport androidx.compose.foundation.shape.RoundedCornerShape\nimport androidx.compose.material3.*\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.draw.clip\nimport androidx.compose.ui.draw.scale\nimport androidx.compose.ui.graphics.Brush\nimport androidx.compose.ui.graphics.Color\nimport androidx.compose.ui.platform.LocalContext\nimport androidx.compose.ui.text.font.FontWeight\nimport androidx.compose.ui.unit.dp\nimport androidx.compose.ui.unit.sp\nimport androidx.lifecycle.ViewModel\nimport androidx.lifecycle.ViewModelProvider\nimport androidx.lifecycle.viewmodel.compose.viewModel\nimport androidx.lifecycle.viewModelScope\nimport com.fitforge.personal.data.*\nimport kotlinx.coroutines.delay\nimport kotlinx.coroutines.flow.*\nimport kotlinx.coroutines.launch\nimport java.util.Locale\n\nclass MainViewModel(private val context: Context) : ViewModel() {\n  private val db = AppDatabase.getDatabase(context)\n  val todayFitness = db.fitnessDao().getTodayFitness().stateIn(viewModelScope, SharingStarted.Lazily, null)\n  val allFinance = db.financeDao().getAllEntries().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())\n  val totalIncome = db.financeDao().getTotalIncome().stateIn(viewModelScope, SharingStarted.Lazily, 0.0)\n  val totalExpense = db.financeDao().getTotalExpense().stateIn(viewModelScope, SharingStarted.Lazily, 0.0)\n  fun addSteps(a: Int) = viewModelScope.launch { val c = todayFitness.value ?: FitnessDay(); db.fitnessDao().insertOrUpdate(c.copy(steps = c.steps + a)) }\n  fun addWorkout(m: Int) = viewModelScope.launch { val c = todayFitness.value ?: FitnessDay(); db.fitnessDao().insertOrUpdate(c.copy(workoutMinutes = c.workoutMinutes + m)) }\n  fun addWater(w: Int) = viewModelScope.launch { val c = todayFitness.value ?: FitnessDay(); db.fitnessDao().insertOrUpdate(c.copy(waterMl = c.waterMl + w)) }\n  fun addFinanceEntry(t: String, a: Double, ty: String, cat: String) = viewModelScope.launch { db.financeDao().insertEntry(FinanceEntry(title = t, amount = a, type = ty, category = cat, date = java.text.SimpleDateFormat(\"dd MMM yyyy\", Locale.getDefault()).format(java.util.Date()))) }\n}\n\nclass MainViewModelFactory(private val context: Context) : ViewModelProvider.Factory {\n  override fun <T : ViewModel> create(modelClass: Class<T>): T = MainViewModel(context.applicationContext) as T\n}\n\nclass MainActivity : ComponentActivity() {\n  override fun onCreate(savedInstanceState: Bundle?) {\n    super.onCreate(savedInstanceState)\n    setContent { FitForgeApp() }\n  }\n}\n\n@Composable\nfun FitForgeApp() {\n  val context = LocalContext.current\n  val vm: MainViewModel = viewModel(factory = MainViewModelFactory(context))\n  var showIntro by remember { mutableStateOf(true) }\n  if (showIntro) IntroScreen { showIntro = false } else MainScreen(vm)\n}\n\n@Composable\nfun IntroScreen(onComplete: () -> Unit) {\n  val infiniteTransition = rememberInfiniteTransition(label = \"pulse\")\n  val scale by infiniteTransition.animateFloat(initialValue = 0.95f, targetValue = 1.05f, animationSpec = infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = \"scale\")\n  LaunchedEffect(Unit) { delay(2500); onComplete() }\n  Box(modifier = Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Color(0xFF2A164D), Color(0xFF0D0B14)), radius = 1200f)), contentAlignment = Alignment.Center) {\n    Column(horizontalAlignment = Alignment.CenterHorizontally) {\n      Box(modifier = Modifier.size(130.dp).scale(scale).clip(CircleShape).background(Brush.linearGradient(listOf(Color(0xFFFF3366), Color(0xFFFF9933)))), contentAlignment = Alignment.Center) {\n        Text(\"F\", color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Black)\n      }\n      Spacer(modifier = Modifier.height(28.dp))\n      Text(\"FITFORGE\", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 6.sp)\n      Text(\"TRAIN • TRACK • CONQUER\", color = Color(0xFFFFAA44), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp, modifier = Modifier.padding(top = 8.dp))\n    }\n  }\n}\n\n@Composable\nfun MainScreen(vm: MainViewModel) {\n  var selectedTab by remember { mutableIntStateOf(0) }\n  val todayFitness by vm.todayFitness.collectAsState()\n  val allFinance by vm.allFinance.collectAsState()\n  val income by vm.totalIncome.collectAsState()\n  val expense by vm.totalExpense.collectAsState()\n  var showDialog by remember { mutableStateOf(false) }\n  Scaffold(\n    containerColor = Color(0xFF10121A),\n    bottomBar = {\n      NavigationBar(containerColor = Color(0xFF161822)) {\n        NavigationBarItem(selected = selectedTab == 0, onClick = { selectedTab = 0 }, label = { Text(\"Fitness\") }, icon = { Text(\"💪\") })\n        NavigationBarItem(selected = selectedTab == 1, onClick = { selectedTab = 1 }, label = { Text(\"Finance\") }, icon = { Text(\"💳\") })\n      }\n    },\n    floatingActionButton = {\n      if (selectedTab == 1) FloatingActionButton(onClick = { showDialog = true }, containerColor = Color(0xFFFF3366), contentColor = Color.White) { Text(\"+\", fontSize = 24.sp) }\n    }\n  ) { p ->\n    Box(modifier = Modifier.padding(p).fillMaxSize().padding(16.dp)) {\n      if (selectedTab == 0) FitnessTab(todayFitness, vm) else FinanceTab(income ?: 0.0, expense ?: 0.0, allFinance)\n    }\n    if (showDialog) AddTransactionDialog(onDismiss = { showDialog = false }, onAdd = { t, a, ty, c -> vm.addFinanceEntry(t, a, ty, c); showDialog = false })\n  }\n}\n\n@Composable\nfun FitnessTab(today: FitnessDay?, vm: MainViewModel) {\n  val current = today ?: FitnessDay()\n  LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {\n    item { MetricCard(\"Steps Taken\", \"\${current.steps} / 10,000\", (current.steps / 10000f).coerceIn(0f, 1f), Color(0xFFFF9933)) }\n    item { MetricCard(\"Workout Time\", \"\${current.workoutMinutes} min / 60 min\", (current.workoutMinutes / 60f).coerceIn(0f, 1f), Color(0xFFFF3366)) }\n    item { MetricCard(\"Water Intake\", \"\${current.waterMl} ml / 3,000 ml\", (current.waterMl / 3000f).coerceIn(0f, 1f), Color(0xFF33CCFF)) }\n    item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {\n      Button(onClick = { vm.addSteps(500) }, modifier = Modifier.weight(1f)) { Text(\"+500\") }\n      Button(onClick = { vm.addWorkout(15) }, modifier = Modifier.weight(1f)) { Text(\"+15m\") }\n      Button(onClick = { vm.addWater(250) }, modifier = Modifier.weight(1f)) { Text(\"+250ml\") }\n    }}\n  }\n}\n\n@Composable\nfun MetricCard(title: String, subtitle: String, progress: Float, color: Color) {\n  Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2130)), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {\n    Column(modifier = Modifier.padding(16.dp)) {\n      Text(title, color = Color.Gray, fontSize = 14.sp)\n      Text(subtitle, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(vertical = 6.dp))\n      LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape), color = color, trackColor = Color(0xFF2C3147))\n    }\n  }\n}\n\n@Composable\nfun FinanceTab(income: Double, expense: Double, list: List<FinanceEntry>) {\n  LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {\n    item { Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2130)), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {\n      Column(modifier = Modifier.padding(18.dp)) {\n        Text(\"Net Balance\", color = Color.Gray)\n        Text(\"₹\${String.format(Locale.getDefault(), \\\"%%.2f\\\", income - expense)}\", color = Color.White, fontWeight = FontWeight.Black, fontSize = 28.sp)\n        Spacer(modifier = Modifier.height(12.dp))\n        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {\n          Text(\"Income: +₹\${String.format(Locale.getDefault(), \\\"%%.2f\\\", income)}\", color = Color(0xFF00E676), fontWeight = FontWeight.Bold)\n          Text(\"Spent: -₹\${String.format(Locale.getDefault(), \\\"%%.2f\\\", expense)}\", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold)\n        }\n      }\n    }}\n    items(list) { i -> Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF161822)), modifier = Modifier.fillMaxWidth()) {\n      Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {\n        Column { Text(i.title, color = Color.White, fontWeight = FontWeight.SemiBold); Text(\"\${i.category} • \${i.date}\", color = Color.Gray, fontSize = 12.sp) }\n        Text((if (i.type == \"income\") \"+₹\" else \"-₹\") + String.format(Locale.getDefault(), \"%%.2f\", i.amount), color = if (i.type == \"income\") Color(0xFF00E676) else Color(0xFFFF5252), fontWeight = FontWeight.Bold)\n      }\n    }}\n  }\n}\n\n@Composable\nfun AddTransactionDialog(onDismiss: () -> Unit, onAdd: (String, Double, String, String) -> Unit) {\n  var t by remember { mutableStateOf(\"\") }\n  var a by remember { mutableStateOf(\"\") }\n  var ty by remember { mutableStateOf(\"expense\") }\n  var c by remember { mutableStateOf(\"General\") }\n  AlertDialog(\n    onDismissRequest = onDismiss,\n    title = { Text(\"New Transaction\") },\n    text = {\n      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {\n        OutlinedTextField(value = t, onValueChange = { t = it }, label = { Text(\"Title\") })\n        OutlinedTextField(value = a, onValueChange = { a = it }, label = { Text(\"Amount (₹)\") })\n        OutlinedTextField(value = c, onValueChange = { c = it }, label = { Text(\"Category\") })\n        Row { RadioButton(selected = ty == \"expense\", onClick = { ty = \"expense\" }); Text(\"Expense\"); Spacer(Modifier.width(16.dp)); RadioButton(selected = ty == \"income\", onClick = { ty = \"income\" }); Text(\"Income\") }\n      }\n    },\n    confirmButton = { Button(onClick = { val n = a.toDoubleOrNull() ?: 0.0; if (t.isNotBlank() && n > 0) onAdd(t, n, ty, c) }) { Text(\"Save\") } },\n    dismissButton = { TextButton(onClick = onDismiss) { Text(\"Cancel\") } }\n  )\n}\n" > FitForge/app/src/main/java/com/fitforge/personal/MainActivity.kt
+              buildFeatures {
+                  compose true
+              }
 
-          # 9. Download Gradle binaries & trigger standard build
-          cd FitForge
-          wget -q https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
-          unzip -q gradle-8.10.2-bin.zip
-          ./gradle-8.10.2/bin/gradle assembleDebug --no-daemon --stacktrace
+              composeOptions {
+                  kotlinCompilerExtensionVersion '1.5.14'
+              }
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: FitForge-debug-apk
-          path: FitForge/app/build/outputs/apk/debug/app-debug.apk
-          
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.13.1'
+              implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.4'
+              implementation 'androidx.activity:activity-compose:1.9.1'
+              implementation platform('androidx.compose:compose-bom:2024.06.00')
+              implementation 'androidx.compose.ui:ui'
+              implementation 'androidx.compose.ui:ui-graphics'
+              implementation 'androidx.compose.material3:material3'
+              implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4'
+
+              implementation 'androidx.room:room-runtime:2.6.1'
+              implementation 'androidx.room:room-ktx:2.6.1'
+              kapt 'androidx.room:room-compiler:2.6.1'
+          }
+          EOF
+
+          # AndroidManifest.xml
+          cat > FitForge/app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:label="FitForge"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.Material.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:theme="@android:style/Theme.Material.NoActionBar">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # AppDatabase.kt
+          cat > FitForge/app/src/main/java/com/fitforge/personal/data/AppDatabase.kt << 'EOF'
+          package com.fitforge.personal.data
+
+          import android.content.Context
+          import androidx.room.*
+          import kotlinx.coroutines.flow.Flow
+
+          @Entity(tableName = "fitness_day")
+          data class FitnessDay(
+              @PrimaryKey val date: String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()),
+              val steps: Int = 0,
+              val workoutMinutes: Int = 0,
+              val waterMl: Int = 0
+          )
+
+          @Entity(tableName = "finance_entry")
+          data class FinanceEntry(
+              @PrimaryKey(autoGenerate = true) val id: Int = 0,
+              val date: String,
+              val title: String,
+              val amount: Double,
+              val type: String,
+              val category: String
+          )
+
+          @Dao
+          interface FitnessDao {
+              @Query("SELECT * FROM fitness_day WHERE date = :date LIMIT 1")
+              fun getTodayFitness(date: String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())): Flow<FitnessDay?>
+
+              @Insert(onConflict = OnConflictStrategy.REPLACE)
+              suspend fun insertOrUpdate(day: FitnessDay)
+          }
+
+          @Dao
+          interface FinanceDao {
+              @Query("SELECT * FROM finance_entry ORDER BY id DESC")
+              fun getAllEntries(): Flow<List<FinanceEntry>>
+
+              @Query("SELECT SUM(amount) FROM finance_entry WHERE type = 'income'")
+              fun getTotalIncome(): Flow<Double?>
+
+              @Query("SELECT SUM(amount) FROM finance_entry WHERE type = 'expense'")
+              fun getTotalExpense(): Flow<Double?>
+
+              @Insert
+              suspend fun insertEntry(entry: FinanceEntry)
+          }
+
+          @Database(entities = [FitnessDay::class, FinanceEntry::class], version = 1, exportSchema = false)
+          abstract class AppDatabase : RoomDatabase() {
+              abstract fun fitnessDao(): FitnessDao
+              abstract fun financeDao(): FinanceDao
+
+              companion object {
+                  @Volatile private var INSTANCE: AppDatabase? = null
+                  fun getDatabase(context: Context): AppDatabase {
+                      return INSTANCE ?: synchronized(this) {
+                          val instance = Room.databaseBuilder(
+                              context.applicationContext,
+                              AppDatabase::class.java,
+                              "fitforge.db"
+                          ).build()
+                          INSTANCE = instance
+                          instance
+                      }
+                  }
+              }
+          }
+          EOF
+
+          # MainActivity.kt
+          cat > FitForge/app/src/main/java/com/fitforge/personal/MainActivity.kt << 'EOF'
+          package com.fitforge.personal
+
+          import android.content.Context
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.animation.core.*
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.draw.scale
+          import androidx.compose.ui.graphics.Brush
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.input.KeyboardType
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.lifecycle.ViewModel
+          import androidx.lifecycle.ViewModelProvider
+          import androidx.lifecycle.viewmodel.compose.viewModel
+          import androidx.lifecycle.viewModelScope
+          import com.fitforge.personal.data.*
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.flow.SharingStarted
+          import kotlinx.coroutines.flow.stateIn
+          import kotlinx.coroutines.launch
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          class MainViewModel(private val context: Context) : ViewModel() {
+              private val db = AppDatabase.getDatabase(context)
+              val todayFitness = db.fitnessDao().getTodayFitness().stateIn(viewModelScope, SharingStarted.Lazily, null)
+              val allFinance = db.financeDao().getAllEntries().stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+              val totalIncome = db.financeDao().getTotalIncome().stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+              val totalExpense = db.financeDao().getTotalExpense().stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+
+              fun addSteps(amount: Int) = viewModelScope.launch {
+                  val current = todayFitness.value ?: FitnessDay()
+                  db.fitnessDao().insertOrUpdate(current.copy(steps = current.steps + amount))
+              }
+
+              fun addWorkout(minutes: Int) = viewModelScope.launch {
+                  val current = todayFitness.value ?: FitnessDay()
+                  db.fitnessDao().insertOrUpdate(current.copy(workoutMinutes = current.workoutMinutes + minutes))
+              }
+
+              fun addWater(ml: Int) = viewModelScope.launch {
+                  val current = todayFitness.value ?: FitnessDay()
+                  db.fitnessDao().insertOrUpdate(current.copy(waterMl = current.waterMl + ml))
+              }
+
+              fun addFinanceEntry(title: String, amount: Double, type: String, category: String) = viewModelScope.launch {
+                  db.financeDao().insertEntry(
+                      FinanceEntry(
+                          title = title,
+                          amount = amount,
+                          type = type,
+                          category = category,
+                          date = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
+                      )
+                  )
+              }
+          }
+
+          class MainViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
+              override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                  @Suppress("UNCHECKED_CAST")
+                  return MainViewModel(context.applicationContext) as T
+              }
+          }
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent {
+                      FitForgeApp()
+                  }
+              }
+          }
+
+          @Composable
+          fun FitForgeApp() {
+              val context = LocalContext.current
+              val vm: MainViewModel = viewModel(factory = MainViewModelFactory(context))
+              var showIntro by remember { mutableStateOf(true) }
+
+              if (showIntro) {
+                  IntroScreen { showIntro = false }
+              } else {
+                  MainScreen(vm)
+              }
+          }
+
+          @Composable
+          fun IntroScreen(onComplete: () -> Unit) {
+              val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+              val scale by infiniteTransition.animateFloat(
+                  initialValue = 0.95f,
+                  targetValue = 1.05f,
+                  animationSpec = infiniteRepeatable(
+                      animation = tween(1200, easing = FastOutSlowInEasing),
+                      repeatMode = RepeatMode.Reverse
+                  ),
+                  label = "scale"
+              )
+
+              LaunchedEffect(Unit) {
+                  delay(2500)
+                  onComplete()
+              }
+
+              Box(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .background(
+                          Brush.radialGradient(
+                              colors = listOf(Color(0xFF2A164D), Color(0xFF0D0B14)),
+                              radius = 1200f
+                          )
+                      ),
+                  contentAlignment = Alignment.Center
+              ) {
+                  Column(
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      verticalArrangement = Arrangement.Center
+                  ) {
+                      Box(
+                          modifier = Modifier
+                              .size(130.dp)
+                              .scale(scale)
+                              .clip(CircleShape)
+                              .background(
+                                  Brush.linearGradient(
+                                      listOf(Color(0xFFFF3366), Color(0xFFFF9933))
+                                  )
+                              ),
+                          contentAlignment = Alignment.Center
+                      ) {
+                          Text(
+                              text = "F",
+                              color = Color.White,
+                              fontSize = 64.sp,
+                              fontWeight = FontWeight.Black
+                          )
+                      }
+
+                      Spacer(modifier = Modifier.height(28.dp))
+
+                      Text(
+                          text = "FITFORGE",
+                          color = Color.White,
+                          fontSize = 32.sp,
+                          fontWeight = FontWeight.ExtraBold,
+                          letterSpacing = 6.sp
+                      )
+
+                      Text(
+                          text = "TRAIN • TRACK • CONQUER",
+                          color = Color(0xFFFFAA44),
+                          fontSize = 12.sp,
+                          fontWeight = FontWeight.Bold,
+                          letterSpacing = 3.sp,
+                          modifier = Modifier.padding(top = 8.dp)
+                      )
+                  }
+              }
+          }
+
+          @Composable
+          fun MainScreen(vm: MainViewModel) {
+              var selectedTab by remember { mutableIntStateOf(0) }
+              val todayFitness by vm.todayFitness.collectAsState()
+              val allFinance by vm.allFinance.collectAsState()
+              val income by vm.totalIncome.collectAsState()
+              val expense by vm.totalExpense.collectAsState()
+              var showDialog by remember { mutableStateOf(false) }
+
+              Scaffold(
+                  containerColor = Color(0xFF10121A),
+                  bottomBar = {
+                      NavigationBar(containerColor = Color(0xFF161822)) {
+                          NavigationBarItem(
+                              selected = selectedTab == 0,
+                              onClick = { selectedTab = 0 },
+                              label = { Text("Fitness") },
+                              icon = { Text("⚡") }
+                          )
+                          NavigationBarItem(
+                              selected = selectedTab == 1,
+                              onClick = { selectedTab = 1 },
+                              label = { Text("Finance") },
+                              icon = { Text("💳") }
+                          )
+                      }
+                  },
+                  floatingActionButton = {
+                      if (selectedTab == 1) {
+                          FloatingActionButton(
+                              onClick = { showDialog = true },
+                              containerColor = Color(0xFFFF3366),
+                              contentColor = Color.White
+                          ) {
+                              Text("+", fontSize = 24.sp)
+                          }
+                      }
+                  }
+              ) { padding ->
+                  Box(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
+                      if (selectedTab == 0) {
+                          FitnessTab(todayFitness, vm)
+                      } else {
+                          FinanceTab(income ?: 0.0, expense ?: 0.0, allFinance)
+                      }
+                  }
+
+                  if (showDialog) {
+                      AddTransactionDialog(
+                          onDismiss = { showDialog = false },
+                          onAdd = { t, a, ty, c ->
+                              vm.addFinanceEntry(t, a, ty, c)
+                              showDialog = false
+                          }
+                      )
+                  }
+              }
+          }
+
+          @Composable
+          fun FitnessTab(today: FitnessDay?, vm: MainViewModel) {
+              val current = today ?: FitnessDay()
+              LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                  item {
+                      MetricCard("Steps Taken", "${current.steps} / 10,000", (current.steps / 10000f).coerceIn(0f, 1f), Color(0xFFFF9933))
+                  }
+                  item {
+                      MetricCard("Workout Time", "${current.workoutMinutes} min / 60 min", (current.workoutMinutes / 60f).coerceIn(0f, 1f), Color(0xFFFF3366))
+                  }
+                  item {
+                      MetricCard("Water Intake", "${current.waterMl} ml / 3,000 ml", (current.waterMl / 3000f).coerceIn(0f, 1f), Color(0xFF33CCFF))
+                  }
+                  item {
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                          Button(onClick = { vm.addSteps(500) }, modifier = Modifier.weight(1f)) { Text("+500") }
+                          Button(onClick = { vm.addWorkout(15) }, modifier = Modifier.weight(1f)) { Text("+15m") }
+                          Button(onClick = { vm.addWater(250) }, modifier = Modifier.weight(1f)) { Text("+250ml") }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun MetricCard(title: String, subtitle: String, progress: Float, color: Color) {
+              Card(
+                  colors = CardDefaults.cardColors(containerColor = Color(0xFF1E2130)),
+                  shape = RoundedCornerShape(16.dp),
+                  modifier = Modifier.fillMaxWidth()
+              ) {
+                  Column(modifier = Modifier.padding(16.dp)) {
+                      Text(title, color = Color.Gray, fontSize = 14.sp)
+                      Text(subtitle, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(vertical = 6.dp))
+                      LinearProgressIndicator(
+                          progress = { progress },
+                          modifier = Modifier.fillMaxWidth().height(8.dp).cli
