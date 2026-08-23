@@ -16,16 +16,16 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Generate Source Code and Build APK
+      - name: Generate Project Files with Python
         run: |
-          set -e
+          python3 - << 'PY_EOF'
+          import os
 
-          mkdir -p FitForge/app/src/main/java/com/fitforge/personal/data
-          mkdir -p FitForge/app/src/main/res/values
-          cd FitForge
+          os.makedirs("FitForge/app/src/main/java/com/fitforge/personal/data", exist_ok=True)
+          os.makedirs("FitForge/app/src/main/res/values", exist_ok=True)
 
-          cat << 'EOF' > settings.gradle.kts
-          pluginManagement {
+          files = {
+              "FitForge/settings.gradle.kts": """pluginManagement {
               repositories {
                   google()
                   mavenCentral()
@@ -41,19 +41,15 @@ jobs:
           }
           rootProject.name = "FitForge"
           include(":app")
-          EOF
-
-          cat << 'EOF' > build.gradle.kts
-          plugins {
+          """,
+              "FitForge/build.gradle.kts": """plugins {
               id("com.android.application") version "8.7.3" apply false
               id("org.jetbrains.kotlin.android") version "2.0.21" apply false
               id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
               id("com.google.devtools.ksp") version "2.0.21-1.0.28" apply false
           }
-          EOF
-
-          cat << 'EOF' > app/build.gradle.kts
-          plugins {
+          """,
+              "FitForge/app/build.gradle.kts": """plugins {
               id("com.android.application")
               id("org.jetbrains.kotlin.android")
               id("org.jetbrains.kotlin.plugin.compose")
@@ -95,10 +91,8 @@ jobs:
               implementation("androidx.room:room-ktx:$room_version")
               ksp("androidx.room:room-compiler:$room_version")
           }
-          EOF
-
-          cat << 'EOF' > app/src/main/AndroidManifest.xml
-          <?xml version="1.0" encoding="utf-8"?>
+          """,
+              "FitForge/app/src/main/AndroidManifest.xml": """<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application
                   android:allowBackup="true"
@@ -117,10 +111,8 @@ jobs:
                   </activity>
               </application>
           </manifest>
-          EOF
-
-          cat << 'EOF' > app/src/main/java/com/fitforge/personal/data/AppDatabase.kt
-          package com.fitforge.personal.data
+          """,
+              "FitForge/app/src/main/java/com/fitforge/personal/data/AppDatabase.kt": """package com.fitforge.personal.data
 
           import android.content.Context
           import androidx.room.*
@@ -188,10 +180,8 @@ jobs:
                   }
               }
           }
-          EOF
-
-          cat << 'EOF' > app/src/main/java/com/fitforge/personal/MainActivity.kt
-          package com.fitforge.personal
+          """,
+              "FitForge/app/src/main/java/com/fitforge/personal/MainActivity.kt": """package com.fitforge.personal
 
           import android.content.Context
           import android.os.Bundle
@@ -460,12 +450,11 @@ jobs:
                       MetricCard("Workout Time", "${current.workoutMinutes} min / 60 min", (current.workoutMinutes / 60f).coerceIn(0f, 1f), Color(0xFFFF3366))
                   }
                   item {
-                      MetricCard("Water Intake", "${current.waterMl} min / 3,000 ml", (current.waterMl / 3000f).coerceIn(0f, 1f), Color(0xFF33CCFF))
+                      MetricCard("Water Intake", "${current.waterMl} ml / 3,000 ml", (current.waterMl / 3000f).coerceIn(0f, 1f), Color(0xFF33CCFF))
                   }
                   item {
                       Text("Quick Log", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 18.sp)
                   }
                   item {
                       Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                          Button(onClick = { vm.addSteps(500) }, modifier = Modifier.weight(1f)) { Text("+500 Steps") }
-         
+                          Button(onClick = { vm.addSteps(500) }, modifier = Modifier.weight
