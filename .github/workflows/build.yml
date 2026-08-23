@@ -19,13 +19,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Assemble FitForge Application
+      - name: Generate and Compile APK
         run: |
           set -e
           mkdir -p FitForge/app/src/main/java/com/fitforge/personal/data
           mkdir -p FitForge/app/src/main/res/values
 
-          # settings.gradle
+          # 1. settings.gradle
           cat > FitForge/settings.gradle << 'EOF'
           pluginManagement {
               repositories {
@@ -45,7 +45,7 @@ jobs:
           include ':app'
           EOF
 
-          # root build.gradle
+          # 2. root build.gradle
           cat > FitForge/build.gradle << 'EOF'
           buildscript {
               repositories {
@@ -65,7 +65,7 @@ jobs:
           }
           EOF
 
-          # app/build.gradle
+          # 3. app/build.gradle
           cat > FitForge/app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
@@ -119,7 +119,7 @@ jobs:
           }
           EOF
 
-          # AndroidManifest.xml
+          # 4. AndroidManifest.xml
           cat > FitForge/app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -141,7 +141,7 @@ jobs:
           </manifest>
           EOF
 
-          # AppDatabase.kt
+          # 5. AppDatabase.kt
           cat > FitForge/app/src/main/java/com/fitforge/personal/data/AppDatabase.kt << 'EOF'
           package com.fitforge.personal.data
 
@@ -213,7 +213,7 @@ jobs:
           }
           EOF
 
-          # MainActivity.kt
+          # 6. MainActivity.kt
           cat > FitForge/app/src/main/java/com/fitforge/personal/MainActivity.kt << 'EOF'
           package com.fitforge.personal
 
@@ -488,4 +488,4 @@ jobs:
                       Text(subtitle, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.padding(vertical = 6.dp))
                       LinearProgressIndicator(
                           progress = { progress },
-                          modifier = Modifier.fillMaxWidth().height(8.dp).cli
+                          modifier = Modifier.fillMaxWidth().hei
